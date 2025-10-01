@@ -31,6 +31,10 @@ Set your API key as an environment variable:
 export TURBOPUFFER_API_KEY="your-api-key"
 ```
 
+```elixir
+client = Turbopuffer.new()
+```
+
 Or pass it directly when creating a client:
 
 ```elixir
@@ -43,15 +47,10 @@ client = Turbopuffer.new(api_key: "your-api-key")
 # Create a client
 client = Turbopuffer.new(api_key: "your-api-key")
 
-# Get or create a namespace
-{:ok, namespace} = Turbopuffer.namespace(client, "my-namespace")
+# Create a namespace reference
+namespace = Turbopuffer.namespace(client, "my-namespace")
 
-# Configure namespace with schema for full-text search
-{:ok, _} = Turbopuffer.create_namespace(namespace,
-  schema: %{
-    "content" => %{"type" => "string", "full_text_search" => true}
-  }
-)
+# Write vectors with schema for full-text search
 
 # Upsert vectors
 vectors = [
@@ -59,27 +58,38 @@ vectors = [
     id: "doc1",
     vector: [0.1, 0.2, 0.3],
     attributes: %{
-      content: "Introduction to machine learning",
-      category: "tutorial"
+      "content" => "Introduction to machine learning",
+      "category" => "tutorial"
     }
   },
   %{
     id: "doc2",
     vector: [0.2, 0.3, 0.4],
     attributes: %{
-      content: "Deep learning fundamentals",
-      category: "tutorial"
+      "content" => "Deep learning fundamentals",
+      "category" => "tutorial"
     }
   }
 ]
 
-{:ok, _} = Turbopuffer.upsert(namespace, vectors)
+{:ok, _} = Turbopuffer.write(namespace,
+  upsert_rows: vectors,
+  distance_metric: "cosine_distance",
+  schema: %{
+    "content" => %{"type" => "string", "full_text_search" => true}
+  }
+)
 
 # Query by vector similarity
 {:ok, results} = Turbopuffer.query(namespace,
   vector: [0.15, 0.25, 0.35],
   top_k: 5
 )
+
+# Results are Result structs with fields: id, dist, attributes, vector
+Enum.each(results, fn result ->
+  IO.puts("ID: #{result.id}, Distance: #{result.dist}")
+end)
 
 # Full-text search
 {:ok, results} = Turbopuffer.text_search(namespace,
@@ -111,14 +121,8 @@ client = Turbopuffer.new(
 ### Namespace Operations
 
 ```elixir
-# Create/get namespace reference
-{:ok, namespace} = Turbopuffer.namespace(client, "namespace-name")
-
-# List all namespaces
-{:ok, namespaces} = Turbopuffer.list_namespaces(client)
-
-# Get namespace statistics
-{:ok, stats} = Turbopuffer.namespace_stats(namespace)
+# Create namespace reference
+namespace = Turbopuffer.namespace(client, "namespace-name")
 
 # Delete namespace
 {:ok, _} = Turbopuffer.delete_namespace(namespace)
@@ -127,11 +131,14 @@ client = Turbopuffer.new(
 ### Vector Operations
 
 ```elixir
-# Upsert vectors
+# Write vectors (upsert)
 vectors = [
-  %{id: "1", vector: [0.1, 0.2], attributes: %{text: "content"}}
+  %{id: "1", vector: [0.1, 0.2], attributes: %{"text" => "content"}}
 ]
-{:ok, _} = Turbopuffer.upsert(namespace, vectors)
+{:ok, _} = Turbopuffer.write(namespace,
+  upsert_rows: vectors,
+  distance_metric: "cosine_distance"
+)
 
 # Query vectors
 {:ok, results} = Turbopuffer.query(namespace,
@@ -141,11 +148,10 @@ vectors = [
   filters: %{"category" => "tutorial"}
 )
 
-# Get vectors by ID
-{:ok, vectors} = Turbopuffer.get_vectors(namespace, ["doc1", "doc2"])
-
 # Delete vectors
-{:ok, _} = Turbopuffer.delete_vectors(namespace, ["doc1", "doc2"])
+{:ok, _} = Turbopuffer.write(namespace,
+  deletes: ["doc1", "doc2"]
+)
 ```
 
 ### Search Operations
@@ -168,7 +174,7 @@ vectors = [
 
 # Multi-query with custom ranking
 queries = [
-  %{rank_by: [:vector, :ann, [0.1, 0.2]], top_k: 10},
+  %{rank_by: ["vector", "ANN", [0.1, 0.2]], top_k: 10},
   %{rank_by: ["content", "BM25", "search terms"], top_k: 10}
 ]
 
@@ -256,4 +262,3 @@ MIT
 - [Turbopuffer Documentation](https://turbopuffer.com/docs)
 - [API Reference](https://turbopuffer.com/docs/reference)
 - [Hex Package](https://hex.pm/packages/turbopuffer)
-

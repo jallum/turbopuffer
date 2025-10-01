@@ -23,7 +23,7 @@ defmodule Turbopuffer.VectorTest do
       ]
 
       # This test validates the vector structure is properly formatted
-      assert {:error, _} = Vector.upsert(namespace, vectors)
+      assert {:error, _} = Vector.write(namespace, vectors)
     end
 
     test "handles vectors with atom keys", %{namespace: namespace} do
@@ -36,7 +36,7 @@ defmodule Turbopuffer.VectorTest do
       ]
 
       # Test that atom keys are properly converted
-      assert {:error, _} = Vector.upsert(namespace, vectors)
+      assert {:error, _} = Vector.write(namespace, vectors)
     end
   end
 
@@ -49,12 +49,13 @@ defmodule Turbopuffer.VectorTest do
 
     test "accepts valid query options", %{namespace: namespace} do
       # This will fail with connection error but validates the parameters
-      result = Vector.query(namespace,
-        vector: [0.1, 0.2, 0.3],
-        top_k: 10,
-        include_attributes: ["text"],
-        include_vectors: false
-      )
+      result =
+        Vector.query(namespace,
+          vector: [0.1, 0.2, 0.3],
+          top_k: 10,
+          include_attributes: ["text"],
+          include_vectors: false
+        )
 
       assert {:error, _} = result
     end

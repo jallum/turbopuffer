@@ -37,7 +37,7 @@ defmodule TurbopufferTest do
     end
 
     test "creates namespace reference", %{client: client} do
-      {:ok, namespace} = Turbopuffer.namespace(client, "test-ns")
+      namespace = Turbopuffer.namespace(client, "test-ns")
       assert %Turbopuffer.Namespace{name: "test-ns"} = namespace
     end
   end

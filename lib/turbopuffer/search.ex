@@ -3,7 +3,7 @@ defmodule Turbopuffer.Search do
   Handles text and hybrid search operations for Turbopuffer.
   """
 
-  alias Turbopuffer.{Client, Namespace}
+  alias Turbopuffer.{Client, Namespace, Result}
 
   @doc """
   Performs a full-text search using BM25 ranking.
@@ -23,7 +23,8 @@ defmodule Turbopuffer.Search do
         top_k: 20
       )
   """
-  @spec text(Namespace.t(), keyword()) :: {:ok, list(map())} | {:error, term()}
+  @spec text(Namespace.t(), Turbopuffer.text_search_opts()) ::
+          {:ok, Turbopuffer.query_response()} | {:error, term()}
   def text(%Namespace{} = namespace, opts) do
     query = Keyword.fetch!(opts, :query)
     attribute = Keyword.fetch!(opts, :attribute)
@@ -39,12 +40,23 @@ defmodule Turbopuffer.Search do
         "top_k" => top_k,
         "include_attributes" => include_attributes
       }
-      |> maybe_add_field("filters", filters)
+      |> maybe_add_field("filters", format_filters(filters))
 
     case Client.post(namespace.client, path, body) do
-      {:ok, %{"vectors" => vectors}} -> {:ok, vectors}
-      {:ok, response} -> {:ok, response}
-      error -> error
+      {:ok, %{"rows" => rows}} when is_list(rows) ->
+        {:ok, Result.from_maps(rows)}
+
+      {:ok, %{"vectors" => vectors}} when is_list(vectors) ->
+        {:ok, Result.from_maps(vectors)}
+
+      {:ok, %{"data" => vectors}} when is_list(vectors) ->
+        {:ok, Result.from_maps(vectors)}
+
+      {:ok, _response} ->
+        {:ok, []}
+
+      error ->
+        error
     end
   end
 
@@ -52,12 +64,12 @@ defmodule Turbopuffer.Search do
   Performs a hybrid search combining vector and text search.
 
   ## Options
-    * `:vector` - The query vector
-    * `:text_query` - The text query string
-    * `:text_attribute` - The attribute to search text in
-    * `:top_k` - Number of results per query (default: 10)
-    * `:include_attributes` - List of attributes to include
-    * `:fusion_method` - Method to combine results (:rrf or :weighted, default: :rrf)
+    * `:vector` - The query vector (required)
+    * `:text_query` - The text query string (required)
+    * `:text_attribute` - The attribute to search text in (required)
+    * `:top_k` - Number of results to return (default: 10)
+    * `:include_attributes` - List of attributes to include (default: true)
+    * `:filters` - Metadata filters to apply
 
   ## Examples
 
@@ -65,17 +77,39 @@ defmodule Turbopuffer.Search do
         vector: [0.1, 0.2, 0.3],
         text_query: "machine learning",
         text_attribute: "content",
-        top_k: 20
+        top_k: 20,
+        filters: %{"category" => "tutorial"}
       )
   """
-  @spec hybrid(Namespace.t(), keyword()) :: {:ok, list(map())} | {:error, term()}
+  @spec hybrid(Namespace.t(), Turbopuffer.hybrid_search_opts()) ::
+          {:ok, Turbopuffer.query_response()} | {:error, term()}
   def hybrid(%Namespace{} = namespace, opts) do
-    queries = build_hybrid_queries(opts)
+    vector = Keyword.fetch!(opts, :vector)
+    text_query = Keyword.fetch!(opts, :text_query)
+    text_attribute = Keyword.fetch!(opts, :text_attribute)
+    top_k = Keyword.get(opts, :top_k, 10)
+    include_attributes = Keyword.get(opts, :include_attributes, true)
+    filters = Keyword.get(opts, :filters)
+
+    # Use multi_query for hybrid search
+    queries = [
+      %{
+        rank_by: ["vector", "ANN", vector],
+        top_k: top_k,
+        include_attributes: include_attributes,
+        filters: filters
+      },
+      %{
+        rank_by: [text_attribute, "BM25", text_query],
+        top_k: top_k,
+        include_attributes: include_attributes,
+        filters: filters
+      }
+    ]
 
     multi_query(namespace,
       queries: queries,
-      top_k: Keyword.get(opts, :top_k, 10),
-      include_attributes: Keyword.get(opts, :include_attributes, true)
+      top_k: top_k
     )
   end
 
@@ -90,7 +124,7 @@ defmodule Turbopuffer.Search do
   ## Examples
 
       queries = [
-        %{rank_by: [:vector, :ann, [0.1, 0.2, 0.3]], top_k: 10},
+        %{rank_by: ["vector", "ANN", [0.1, 0.2, 0.3]], top_k: 10},
         %{rank_by: ["content", "BM25", "search terms"], top_k: 10}
       ]
 
@@ -99,13 +133,14 @@ defmodule Turbopuffer.Search do
         top_k: 20
       )
   """
-  @spec multi_query(Namespace.t(), keyword()) :: {:ok, list(map())} | {:error, term()}
+  @spec multi_query(Namespace.t(), Turbopuffer.multi_query_opts()) ::
+          {:ok, Turbopuffer.query_response()} | {:error, term()}
   def multi_query(%Namespace{} = namespace, opts) do
     queries = Keyword.fetch!(opts, :queries)
     top_k = Keyword.get(opts, :top_k, 10)
     include_attributes = Keyword.get(opts, :include_attributes, true)
 
-    path = "/v2/namespaces/#{namespace.name}/multi_query"
+    path = "/v2/namespaces/#{namespace.name}/query?stainless_overload=multiQuery"
 
     formatted_queries =
       Enum.map(queries, fn query ->
@@ -118,48 +153,28 @@ defmodule Turbopuffer.Search do
     }
 
     case Client.post(namespace.client, path, body) do
-      {:ok, %{"vectors" => vectors}} -> {:ok, vectors}
-      {:ok, response} -> {:ok, response}
-      error -> error
+      {:ok, %{"results" => results}} when is_list(results) ->
+        # Multi-query returns results array, each with its own rows
+        # We need to merge/deduplicate the rows from all query results
+        all_rows =
+          results
+          |> Enum.flat_map(fn %{"rows" => rows} -> rows || [] end)
+          |> Enum.uniq_by(&Map.get(&1, "id"))
+
+        {:ok, Result.from_maps(all_rows)}
+
+      {:ok, %{"rows" => rows}} when is_list(rows) ->
+        {:ok, Result.from_maps(rows)}
+
+      {:ok, %{"vectors" => vectors}} when is_list(vectors) ->
+        {:ok, Result.from_maps(vectors)}
+
+      {:ok, _response} ->
+        {:ok, []}
+
+      error ->
+        error
     end
-  end
-
-  defp build_hybrid_queries(opts) do
-    queries = []
-
-    # Add vector query if provided
-    queries =
-      case Keyword.fetch(opts, :vector) do
-        {:ok, vector} ->
-          vector_query = %{
-            rank_by: [:vector, :ann, vector],
-            top_k: Keyword.get(opts, :top_k, 10)
-          }
-          [vector_query | queries]
-
-        :error ->
-          queries
-      end
-
-    # Add text query if provided
-    queries =
-      case {Keyword.fetch(opts, :text_query), Keyword.fetch(opts, :text_attribute)} do
-        {{:ok, text_query}, {:ok, text_attribute}} ->
-          text_query = %{
-            rank_by: [text_attribute, "BM25", text_query],
-            top_k: Keyword.get(opts, :top_k, 10)
-          }
-          [text_query | queries]
-
-        _ ->
-          queries
-      end
-
-    if queries == [] do
-      raise ArgumentError, "At least one of :vector or :text_query/:text_attribute must be provided"
-    end
-
-    queries
   end
 
   defp format_query(%{rank_by: rank_by} = query, include_attributes) do
@@ -178,13 +193,36 @@ defmodule Turbopuffer.Search do
           rank_by
       end
 
-    %{
+    result = %{
       "rank_by" => formatted_rank_by,
       "top_k" => Map.get(query, :top_k, 10),
       "include_attributes" => Map.get(query, :include_attributes, include_attributes)
     }
+
+    # Add filters if present
+    case Map.get(query, :filters) do
+      nil -> result
+      filters -> Map.put(result, "filters", format_filters(filters))
+    end
   end
 
   defp maybe_add_field(map, _key, nil), do: map
   defp maybe_add_field(map, key, value), do: Map.put(map, key, value)
+
+  # Convert map filters to tuple format expected by API
+  defp format_filters(nil), do: nil
+
+  defp format_filters(filters) when is_map(filters) do
+    conditions =
+      Enum.map(filters, fn {key, value} ->
+        [to_string(key), "Eq", value]
+      end)
+
+    case conditions do
+      [single] -> single
+      multiple -> ["And" | [multiple]]
+    end
+  end
+
+  defp format_filters(filters), do: filters
 end

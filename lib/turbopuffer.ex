@@ -10,21 +10,22 @@ defmodule Turbopuffer do
       # Create a client
       client = Turbopuffer.new(api_key: "your-api-key")
 
-      # Get or create a namespace
-      {:ok, namespace} = Turbopuffer.namespace(client, "my-namespace")
+      # Create a namespace reference
+      namespace = Turbopuffer.namespace(client, "my-namespace")
 
-      # Upsert vectors
-      vectors = [
-        %{
-          id: "doc1",
-          vector: [0.1, 0.2, 0.3],
-          attributes: %{
-            text: "Sample document",
-            category: "example"
+      # Write vectors
+      {:ok, _} = Turbopuffer.write(namespace,
+        upsert_rows: [
+          %{
+            id: 1,
+            vector: [0.1, 0.2, 0.3],
+            attributes: %{
+              "text" => "Sample document",
+              "category" => "example"
+            }
           }
-        }
-      ]
-      {:ok, _} = Turbopuffer.upsert(namespace, vectors)
+        ]
+      )
 
       # Query vectors
       {:ok, results} = Turbopuffer.query(namespace,
@@ -36,11 +37,83 @@ defmodule Turbopuffer do
       {:ok, results} = Turbopuffer.hybrid_search(namespace,
         vector: [0.1, 0.2, 0.3],
         text_query: "machine learning",
-        text_attribute: "content"
+        text_attribute: "text"
       )
   """
 
-  alias Turbopuffer.{Client, Namespace, Vector, Search}
+  alias Turbopuffer.{Client, Namespace, Vector, Search, Result}
+
+  # Client options
+  @type client_opts :: [
+          {:api_key, String.t()}
+          | {:region, :gcp_us_central1 | :gcp_europe_west4 | :gcp_asia_northeast1}
+          | {:base_url, String.t()}
+          | {:finch_name, atom()}
+        ]
+
+  @type request_opts :: [
+          {:timeout, pos_integer()}
+          | {:receive_timeout, pos_integer()}
+        ]
+
+  # Filter types
+  # Filters support various operators and value types:
+  # - Equality: %{"category" => "sports"}
+  # - Inequality: %{"price" => %{"$gte" => 10.0, "$lte" => 100.0}}
+  # - In/Not in: %{"status" => %{"$in" => ["active", "pending"]}}
+  # - Null checks: %{"deleted_at" => nil}
+  @type filter_value :: String.t() | number() | boolean() | nil | [String.t() | number()]
+  @type filter_operator :: filter_value | %{String.t() => filter_value}
+  @type filters :: %{String.t() => filter_operator}
+
+  # Schema types for namespace configuration
+  @type schema_field :: %{
+          optional(String.t()) => String.t() | boolean() | map()
+        }
+  @type schema :: %{String.t() => schema_field()}
+
+  # Response types
+  @type query_response :: [Result.t()]
+  @type success_response :: %{} | %{String.t() => any()}
+
+  # Vector options
+  @type vector_upsert_opts :: [
+          {:distance_metric, String.t()}
+          | {:schema, schema()}
+        ]
+
+  @type vector_query_opts :: [
+          {:vector, [float()]}
+          | {:top_k, pos_integer()}
+          | {:distance_metric, String.t()}
+          | {:include_attributes, boolean() | [String.t()]}
+          | {:include_vectors, boolean()}
+          | {:filters, filters()}
+        ]
+
+  # Search options
+  @type text_search_opts :: [
+          {:query, String.t()}
+          | {:attribute, String.t()}
+          | {:top_k, pos_integer()}
+          | {:include_attributes, boolean() | [String.t()]}
+          | {:filters, filters()}
+        ]
+
+  @type hybrid_search_opts :: [
+          {:vector, [float()]}
+          | {:text_query, String.t()}
+          | {:text_attribute, String.t()}
+          | {:top_k, pos_integer()}
+          | {:include_attributes, boolean() | [String.t()]}
+          | {:fusion_method, :rrf | :weighted}
+        ]
+
+  @type multi_query_opts :: [
+          {:queries, [map()]}
+          | {:top_k, pos_integer()}
+          | {:include_attributes, boolean() | [String.t()]}
+        ]
 
   @doc """
   Creates a new Turbopuffer client.
@@ -60,85 +133,48 @@ defmodule Turbopuffer do
         region: :gcp_europe_west4
       )
   """
-  @spec new(keyword()) :: Client.t()
+  @spec new(client_opts()) :: Client.t()
   defdelegate new(opts), to: Client
 
   @doc """
-  Gets or creates a namespace reference.
+  Creates a namespace reference.
 
   ## Examples
 
-      {:ok, namespace} = Turbopuffer.namespace(client, "my-namespace")
+      namespace = Turbopuffer.namespace(client, "my-namespace")
   """
-  @spec namespace(Client.t(), String.t()) :: {:ok, Namespace.t()}
-  def namespace(client, name) do
-    {:ok, Namespace.new(client, name)}
-  end
+  @spec namespace(Client.t(), String.t()) :: Namespace.t()
+  defdelegate namespace(client, name), to: Namespace, as: :new
 
   @doc """
-  Creates a namespace with configuration.
+  Writes vectors to a namespace (upserts and/or deletes).
 
   ## Options
-    * `:distance_metric` - The distance metric to use (default: "cosine_distance")
-    * `:schema` - Schema configuration for full-text search
+    * `:upsert_rows` - List of vectors to upsert
+    * `:deletes` - List of IDs to delete
+    * `:distance_metric` - The distance metric to use (e.g., "cosine_distance", "euclidean_squared")
+    * `:schema` - Schema configuration for attributes
 
   ## Examples
 
-      {:ok, _} = Turbopuffer.create_namespace(namespace,
-        schema: %{
-          "content" => %{"type" => "string", "full_text_search" => true}
-        }
+      # Upsert and delete in one operation
+      {:ok, _} = Turbopuffer.write(namespace,
+        upsert_rows: [
+          %{id: 1, vector: [0.1, 0.2], attributes: %{"text" => "doc"}}
+        ],
+        deletes: [2, 3],
+        distance_metric: "cosine_distance"
+      )
+
+      # Upsert with flat attributes
+      {:ok, _} = Turbopuffer.write(namespace,
+        upsert_rows: [
+          %{id: 4, vector: [0.3, 0.4], text: "another doc", category: "example"}
+        ]
       )
   """
-  @spec create_namespace(Namespace.t(), keyword()) :: {:ok, map()} | {:error, term()}
-  defdelegate create_namespace(namespace, opts \\ []), to: Namespace, as: :create
-
-  @doc """
-  Lists all namespaces.
-
-  ## Examples
-
-      {:ok, namespaces} = Turbopuffer.list_namespaces(client)
-  """
-  @spec list_namespaces(Client.t()) :: {:ok, list(String.t())} | {:error, term()}
-  defdelegate list_namespaces(client), to: Namespace, as: :list
-
-  @doc """
-  Deletes a namespace.
-
-  ## Examples
-
-      {:ok, _} = Turbopuffer.delete_namespace(namespace)
-  """
-  @spec delete_namespace(Namespace.t()) :: {:ok, map()} | {:error, term()}
-  defdelegate delete_namespace(namespace), to: Namespace, as: :delete
-
-  @doc """
-  Gets namespace statistics.
-
-  ## Examples
-
-      {:ok, stats} = Turbopuffer.namespace_stats(namespace)
-  """
-  @spec namespace_stats(Namespace.t()) :: {:ok, map()} | {:error, term()}
-  defdelegate namespace_stats(namespace), to: Namespace, as: :stats
-
-  @doc """
-  Upserts vectors into a namespace.
-
-  ## Examples
-
-      vectors = [
-        %{
-          id: "doc1",
-          vector: [0.1, 0.2, 0.3],
-          attributes: %{text: "Sample document"}
-        }
-      ]
-      {:ok, _} = Turbopuffer.upsert(namespace, vectors)
-  """
-  @spec upsert(Namespace.t(), list(map())) :: {:ok, map()} | {:error, term()}
-  defdelegate upsert(namespace, vectors), to: Vector
+  @spec write(Namespace.t(), keyword()) :: {:ok, success_response()} | {:error, term()}
+  defdelegate write(namespace, opts), to: Vector
 
   @doc """
   Queries vectors by similarity.
@@ -156,28 +192,8 @@ defmodule Turbopuffer do
         top_k: 10
       )
   """
-  @spec query(Namespace.t(), keyword()) :: {:ok, list(map())} | {:error, term()}
+  @spec query(Namespace.t(), vector_query_opts()) :: {:ok, query_response()} | {:error, term()}
   defdelegate query(namespace, opts), to: Vector
-
-  @doc """
-  Gets vectors by ID.
-
-  ## Examples
-
-      {:ok, vectors} = Turbopuffer.get_vectors(namespace, ["doc1", "doc2"])
-  """
-  @spec get_vectors(Namespace.t(), list(String.t()), keyword()) :: {:ok, list(map())} | {:error, term()}
-  defdelegate get_vectors(namespace, ids, opts \\ []), to: Vector, as: :get
-
-  @doc """
-  Deletes vectors by ID.
-
-  ## Examples
-
-      {:ok, _} = Turbopuffer.delete_vectors(namespace, ["doc1", "doc2"])
-  """
-  @spec delete_vectors(Namespace.t(), list(String.t())) :: {:ok, map()} | {:error, term()}
-  defdelegate delete_vectors(namespace, ids), to: Vector, as: :delete
 
   @doc """
   Performs full-text search.
@@ -195,7 +211,8 @@ defmodule Turbopuffer do
         top_k: 20
       )
   """
-  @spec text_search(Namespace.t(), keyword()) :: {:ok, list(map())} | {:error, term()}
+  @spec text_search(Namespace.t(), text_search_opts()) ::
+          {:ok, query_response()} | {:error, term()}
   defdelegate text_search(namespace, opts), to: Search, as: :text
 
   @doc """
@@ -216,7 +233,8 @@ defmodule Turbopuffer do
         top_k: 20
       )
   """
-  @spec hybrid_search(Namespace.t(), keyword()) :: {:ok, list(map())} | {:error, term()}
+  @spec hybrid_search(Namespace.t(), hybrid_search_opts()) ::
+          {:ok, query_response()} | {:error, term()}
   defdelegate hybrid_search(namespace, opts), to: Search, as: :hybrid
 
   @doc """
@@ -234,6 +252,17 @@ defmodule Turbopuffer do
       ]
       {:ok, results} = Turbopuffer.multi_query(namespace, queries: queries)
   """
-  @spec multi_query(Namespace.t(), keyword()) :: {:ok, list(map())} | {:error, term()}
+  @spec multi_query(Namespace.t(), multi_query_opts()) ::
+          {:ok, query_response()} | {:error, term()}
   defdelegate multi_query(namespace, opts), to: Search
+
+  @doc """
+  Deletes a namespace.
+
+  ## Examples
+
+      {:ok, _} = Turbopuffer.delete_namespace(namespace)
+  """
+  @spec delete_namespace(Namespace.t()) :: {:ok, success_response()} | {:error, term()}
+  defdelegate delete_namespace(namespace), to: Namespace, as: :delete
 end
