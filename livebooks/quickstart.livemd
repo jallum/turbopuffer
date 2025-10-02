@@ -2,7 +2,7 @@
 
 ```elixir
 Mix.install([
-  {:turbopuffer, path: "/Users/j5n/Workspace/turbopuffer"},
+  {:turbopuffer, "~> 0.1"},
   {:req, "~> 0.4"},
   {:kino, "~> 0.12"}
 ])
