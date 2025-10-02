@@ -7,7 +7,12 @@ defmodule Turbopuffer.MixProject do
       version: "0.1.0",
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+      description: "Elixir client for the Turbopuffer vector search API",
+      package: [
+        licenses: ["MIT"],
+        links: %{"GitHub" => "https://github.com/jallum/turbopuffer"}
+      ]
     ]
   end
 
@@ -22,9 +27,7 @@ defmodule Turbopuffer.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:finch, "~> 0.18"},
-      {:nimble_options, "~> 1.0"},
-      {:telemetry, "~> 1.2"},
+      {:finch, "~> 0.20"},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
       {:bypass, "~> 2.1", only: :test}
     ]
