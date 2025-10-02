@@ -76,19 +76,34 @@ defmodule Turbopuffer do
   @type query_response :: [Result.t()]
   @type success_response :: %{} | %{String.t() => any()}
 
-  # Vector options
-  @type vector_upsert_opts :: [
-          {:distance_metric, String.t()}
+  # Vector write options
+  @type vector_write_opts :: [
+          {:upsert_rows, [map()]}
+          | {:upsert_columns, map()}
+          | {:patch_rows, [map()]}
+          | {:patch_columns, map()}
+          | {:deletes, [String.t() | integer()]}
+          | {:distance_metric, String.t()}
           | {:schema, schema()}
+          | {:upsert_condition, map()}
+          | {:patch_condition, map()}
+          | {:delete_condition, map()}
+          | {:delete_by_filter, map()}
+          | {:copy_from_namespace, String.t()}
+          | {:encryption, map()}
         ]
 
   @type vector_query_opts :: [
           {:vector, [float()]}
           | {:top_k, pos_integer()}
-          | {:distance_metric, String.t()}
           | {:include_attributes, boolean() | [String.t()]}
           | {:include_vectors, boolean()}
           | {:filters, filters()}
+          | {:exclude_attributes, [String.t()]}
+          | {:aggregate_by, map()}
+          | {:group_by, [String.t()]}
+          | {:vector_encoding, :float | :base64}
+          | {:consistency, :strong | :eventual}
         ]
 
   # Search options
@@ -106,7 +121,7 @@ defmodule Turbopuffer do
           | {:text_attribute, String.t()}
           | {:top_k, pos_integer()}
           | {:include_attributes, boolean() | [String.t()]}
-          | {:fusion_method, :rrf | :weighted}
+          | {:filters, filters()}
         ]
 
   @type multi_query_opts :: [
@@ -173,7 +188,7 @@ defmodule Turbopuffer do
         ]
       )
   """
-  @spec write(Namespace.t(), keyword()) :: {:ok, success_response()} | {:error, term()}
+  @spec write(Namespace.t(), vector_write_opts()) :: {:ok, success_response()} | {:error, term()}
   defdelegate write(namespace, opts), to: Vector
 
   @doc """
@@ -182,8 +197,14 @@ defmodule Turbopuffer do
   ## Options
     * `:vector` - The query vector (required)
     * `:top_k` - Number of results to return (default: 10)
-    * `:include_attributes` - List of attributes to include
+    * `:include_attributes` - List of attributes to include or boolean
+    * `:include_vectors` - Whether to include vectors in response
     * `:filters` - Metadata filters
+    * `:exclude_attributes` - List of attributes to exclude
+    * `:aggregate_by` - Aggregation configuration
+    * `:group_by` - Group aggregations by attributes
+    * `:vector_encoding` - Response format (:float or :base64)
+    * `:consistency` - Read consistency (:strong or :eventual)
 
   ## Examples
 

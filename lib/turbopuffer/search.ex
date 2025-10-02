@@ -28,37 +28,46 @@ defmodule Turbopuffer.Search do
   def text(%Namespace{} = namespace, opts) do
     query = Keyword.fetch!(opts, :query)
     attribute = Keyword.fetch!(opts, :attribute)
-    top_k = Keyword.get(opts, :top_k, 10)
-    include_attributes = Keyword.get(opts, :include_attributes, true)
-    filters = Keyword.get(opts, :filters)
-
     path = "/v2/namespaces/#{namespace.name}/query"
 
-    body =
-      %{
-        "rank_by" => [attribute, "BM25", query],
-        "top_k" => top_k,
-        "include_attributes" => include_attributes
-      }
-      |> maybe_add_field("filters", format_filters(filters))
+    body = build_text_search_body(opts, query, attribute)
 
-    case Client.post(namespace.client, path, body) do
-      {:ok, %{"rows" => rows}} when is_list(rows) ->
-        {:ok, Result.from_maps(rows)}
+    namespace.client
+    |> Client.post(path, body)
+    |> handle_search_response()
+  end
 
-      {:ok, %{"vectors" => vectors}} when is_list(vectors) ->
-        {:ok, Result.from_maps(vectors)}
+  defp build_text_search_body(opts, query, attribute) do
+    base_body = %{
+      "rank_by" => [attribute, "BM25", query],
+      "top_k" => Keyword.get(opts, :top_k, 10),
+      "include_attributes" => Keyword.get(opts, :include_attributes, true)
+    }
 
-      {:ok, %{"data" => vectors}} when is_list(vectors) ->
-        {:ok, Result.from_maps(vectors)}
-
-      {:ok, _response} ->
-        {:ok, []}
-
-      error ->
-        error
+    case Keyword.get(opts, :filters) do
+      nil -> base_body
+      filters -> Map.put(base_body, "filters", format_filters(filters))
     end
   end
+
+  # Handle different response formats with pattern matching
+  defp handle_search_response({:ok, %{"rows" => rows}}) when is_list(rows) do
+    {:ok, Result.from_maps(rows)}
+  end
+
+  defp handle_search_response({:ok, %{"vectors" => vectors}}) when is_list(vectors) do
+    {:ok, Result.from_maps(vectors)}
+  end
+
+  defp handle_search_response({:ok, %{"data" => data}}) when is_list(data) do
+    {:ok, Result.from_maps(data)}
+  end
+
+  defp handle_search_response({:ok, _}) do
+    {:ok, []}
+  end
+
+  defp handle_search_response(error), do: error
 
   @doc """
   Performs a hybrid search combining vector and text search.
@@ -178,36 +187,32 @@ defmodule Turbopuffer.Search do
   end
 
   defp format_query(%{rank_by: rank_by} = query, include_attributes) do
-    formatted_rank_by =
-      case rank_by do
-        [:vector, :ann, vector] ->
-          ["vector", "ANN", vector]
-
-        [attribute, "BM25", text] when is_binary(attribute) ->
-          [attribute, "BM25", text]
-
-        [attribute, method, value] ->
-          [to_string(attribute), to_string(method), value]
-
-        _ ->
-          rank_by
-      end
-
-    result = %{
-      "rank_by" => formatted_rank_by,
+    base_query = %{
+      "rank_by" => format_rank_by(rank_by),
       "top_k" => Map.get(query, :top_k, 10),
       "include_attributes" => Map.get(query, :include_attributes, include_attributes)
     }
 
-    # Add filters if present
     case Map.get(query, :filters) do
-      nil -> result
-      filters -> Map.put(result, "filters", format_filters(filters))
+      nil -> base_query
+      filters -> Map.put(base_query, "filters", format_filters(filters))
     end
   end
 
-  defp maybe_add_field(map, _key, nil), do: map
-  defp maybe_add_field(map, key, value), do: Map.put(map, key, value)
+  # Pattern match on rank_by formats
+  defp format_rank_by([:vector, :ann, vector]) do
+    ["vector", "ANN", vector]
+  end
+
+  defp format_rank_by([attribute, "BM25", text]) when is_binary(attribute) do
+    [attribute, "BM25", text]
+  end
+
+  defp format_rank_by([attribute, method, value]) do
+    [to_string(attribute), to_string(method), value]
+  end
+
+  defp format_rank_by(rank_by), do: rank_by
 
   # Convert map filters to tuple format expected by API
   defp format_filters(nil), do: nil
