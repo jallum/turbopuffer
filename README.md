@@ -11,6 +11,8 @@ An Elixir client library for the [Turbopuffer](https://turbopuffer.com) vector d
 - Built with Finch for efficient HTTP connection pooling
 - Native JSON support (Elixir 1.18+)
 
+[![Run in Livebook](https://livebook.dev/badge/v1/blue.svg)](https://livebook.dev/run?url=https%3A%2F%2Fraw.githubusercontent.com%2Fjallum%2Fturbopuffer%2Frefs%2Fheads%2Fmain%2Flivebooks%2Fquickstart.livemd)
+
 ## Installation
 
 Add `turbopuffer` to your list of dependencies in `mix.exs`:
