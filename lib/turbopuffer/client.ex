@@ -5,6 +5,7 @@ defmodule Turbopuffer.Client do
 
   @regions %{
     gcp_us_central1: "https://gcp-us-central1.turbopuffer.com",
+    gcp_us_east4: "https://gcp-us-east4.turbopuffer.com",
     gcp_europe_west4: "https://gcp-europe-west4.turbopuffer.com",
     gcp_asia_northeast1: "https://gcp-asia-northeast1.turbopuffer.com"
   }
