@@ -143,7 +143,8 @@ defmodule Turbopuffer.Vector do
 
   ## Options
     * `:vector` - The query vector (required)
-    * `:top_k` - Number of results to return (default: 10)
+    * `:limit` - An object describing the way to limit results (can include a limit per attribute)
+    * `:top_k` - Number of results to return (alias for limit.total) (default: 10)
     * `:include_attributes` - List of attributes to include in results, or `true` for all (default: true)
     * `:filters` - Metadata filters to apply as a map
     * `:include_vectors` - Whether to include vectors in results (default: false)
@@ -247,6 +248,11 @@ defmodule Turbopuffer.Vector do
   defp add_query_option({:filters, nil}, acc), do: acc
   defp add_query_option({:filters, filters}, acc) do
     Map.put(acc, "filters", format_filters(filters))
+  end
+
+  defp add_query_option({:limit, nil}, acc), do: acc
+  defp add_query_option({:limit, limit}, acc) do
+    Map.put(acc, "limit", limit)
   end
 
   defp add_query_option({:exclude_attributes, nil}, acc), do: acc
